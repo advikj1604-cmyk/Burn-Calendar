@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Burn Calendar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: one working screen. Calendar heatmap is the main object, map picks the area, charts and tables explain it. */
+:root {
+  --bg: #f4f5f3; --surface: #fcfcfb; --line: #dcdfdb; --ink: #14181a; --ink-2: #4c5356; --ink-3: #7b8286;
+  --accent: #c2410c;
+  --s-modis: #2a78d6; --s-viirs: #1baf7a; --s-harm: #eb6834;
+  --ramp-0: #f0e9e2; --ramp-1: #f7c9a6; --ramp-2: #f08a4b; --ramp-3: #c2410c; --ramp-4: #5f1d05;
+  --cell-none: #e9ebe8; --band: #d7dde2; --warn-bg: #fff3d6; --warn-ink: #6b4a00; --warn-line: #f0c860; --crit: #d03b3b;
+  --display: "IBM Plex Sans Condensed", "Arial Narrow", sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #131615; --surface: #1b1f1e; --line: #313735; --ink: #eef0ed; --ink-2: #b9bfbb; --ink-3: #8a918d;
+    --accent: #f59a6c;
+    --s-modis: #3987e5; --s-viirs: #199e70; --s-harm: #d95926;
+    --ramp-0: #2b2521; --ramp-1: #5c2a12; --ramp-2: #a8431a; --ramp-3: #ea7a45; --ramp-4: #ffd6bd;
+    --cell-none: #232827; --band: #2d3a44; --warn-bg: #3a2f10; --warn-ink: #f6dc94; --warn-line: #7a6220; --crit: #e66767;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #131615; --surface: #1b1f1e; --line: #313735; --ink: #eef0ed; --ink-2: #b9bfbb; --ink-3: #8a918d;
+  --accent: #f59a6c;
+  --s-modis: #3987e5; --s-viirs: #199e70; --s-harm: #d95926;
+  --ramp-0: #2b2521; --ramp-1: #5c2a12; --ramp-2: #a8431a; --ramp-3: #ea7a45; --ramp-4: #ffd6bd;
+  --cell-none: #232827; --band: #2d3a44; --warn-bg: #3a2f10; --warn-ink: #f6dc94; --warn-line: #7a6220; --crit: #e66767;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--body); }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 20px 20px 48px; display: flex; flex-direction: column; gap: 16px; }
+header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; justify-content: space-between; }
+h1 { font: 600 30px/1.1 var(--display); margin: 0; letter-spacing: 0.01em; text-wrap: balance; }
+h2 { font: 600 17px/1.2 var(--display); margin: 0; letter-spacing: 0.02em; text-wrap: balance; }
+.sub { color: var(--ink-2); margin: 4px 0 0; max-width: 65ch; }
+.meta { color: var(--ink-3); font-size: 13px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button, select, .filebtn { font: 500 14px var(--body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; cursor: pointer; }
+button:hover, .filebtn:hover, select:hover { border-color: var(--ink-3); }
+button:focus-visible, select:focus-visible, .filebtn:focus-within, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary, .filebtn { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.filebtn input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.filebtn { position: relative; display: inline-block; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: var(--surface); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.notice { background: var(--warn-bg); color: var(--warn-ink); border: 1px solid var(--warn-line); border-radius: 8px; padding: 10px 14px; }
+.notice strong { font-weight: 600; }
+.notice.err { border-color: var(--crit); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+.tile .k { color: var(--ink-3); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+.tile .v { font: 600 26px/1.2 var(--display); font-variant-numeric: tabular-nums; margin-top: 2px; }
+.tile .d { color: var(--ink-2); font-size: 13px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.panel-head { display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: space-between; align-items: center; }
+.panel p { margin: 0; color: var(--ink-2); max-width: 70ch; font-size: 14px; }
+.row { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.row.main { grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); }
+@media (max-width: 860px) { .row, .row.main { grid-template-columns: minmax(0, 1fr); } }
+svg { display: block; width: 100%; height: auto; overflow: visible; }
+svg text { font-family: var(--body); fill: var(--ink-2); font-size: 11px; font-variant-numeric: tabular-nums; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink-2); align-items: center; }
+.legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.legend i.box { height: 10px; width: 14px; }
+.rampbar { display: inline-block; width: 120px; height: 10px; border-radius: 2px; vertical-align: middle; margin: 0 6px; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+th { text-align: left; font-weight: 500; color: var(--ink-3); border-bottom: 1px solid var(--line); padding: 6px 10px 6px 0; white-space: nowrap; }
+td { border-bottom: 1px solid var(--line); padding: 6px 10px 6px 0; vertical-align: top; }
+td.num, th.num { text-align: right; }
+.pill { display: inline-block; font-size: 12px; font-weight: 500; border-radius: 99px; padding: 1px 9px; border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
+.pill.hot { border-color: var(--crit); color: var(--crit); }
+.pill.sim { background: var(--warn-bg); color: var(--warn-ink); border-color: var(--warn-line); }
+.toolbar { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.toolbar label { color: var(--ink-2); font-size: 14px; display: inline-flex; gap: 8px; align-items: center; }
+.toolbar select { font-weight: 600; max-width: 100%; }
+.chip { font-size: 13px; color: var(--ink-2); border: 1px solid var(--line); border-radius: 99px; padding: 3px 4px 3px 12px; display: inline-flex; gap: 6px; align-items: center; }
+.chip button { border: 0; padding: 2px 8px; border-radius: 99px; background: var(--bg); font-size: 12px; }
+.findings { border-left: 4px solid var(--accent); padding: 4px 0 4px 16px; }
+.findings h2 { margin-bottom: 6px; }
+.findings ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px 28px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.findings li { color: var(--ink-2); max-width: 65ch; }
+.findings li b { color: var(--ink); font-weight: 600; }
+#tip { position: fixed; pointer-events: none; z-index: 10; background: var(--ink); color: var(--bg); font-size: 12.5px; line-height: 1.4; padding: 6px 9px; border-radius: 6px; max-width: 260px; display: none; font-variant-numeric: tabular-nums; }
+#tip b { font-weight: 600; }
+.method { display: grid; gap: 16px 32px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.method h3 { font: 600 14px var(--body); margin: 0 0 4px; }
+.method p, .method li { color: var(--ink-2); font-size: 14px; max-width: 65ch; }
+.method ol, .method ul { margin: 0; padding-left: 20px; }
+code { font-family: var(--mono); font-size: 0.92em; }
+.cellhit { cursor: pointer; }
+footer { color: var(--ink-3); font-size: 13px; }
+footer a { color: inherit; }
+#copyout { width: 100%; height: 120px; font: 12px var(--mono); background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 8px; display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Burn Calendar</h1>
+      <p class="sub">One consistent record of burning activity from MODIS and VIIRS fire hotspots. See when a place burns, how that has changed, and which weeks were unusual.</p>
+      <div class="meta" id="dsmeta"></div>
+    </div>
+    <div class="actions">
+      <label class="filebtn" for="files">Load FIRMS CSV files<input id="files" type="file" accept=".csv,.txt" multiple></label>
+      <button id="demo" type="button" hidden>Back to built-in data</button>
+    </div>
+  </header>
+  <div id="notice"></div>
+
+  <div class="toolbar" id="toolbar">
+    <label for="region" id="regionwrap">Region <select id="region"></select></label>
+    <label for="year">Year <select id="year"></select></label>
+    <div class="seg" role="group" aria-label="Which record to show in the calendar">
+      <button type="button" id="m-harm" aria-pressed="true">Harmonized</button>
+      <button type="button" id="m-raw" aria-pressed="false">Raw counts</button>
+    </div>
+    <span class="chip" id="cellchip" hidden></span>
+  </div>
+
+  <section class="findings" aria-label="Key findings for the selected area">
+    <h2 id="findtitle">Key findings</h2>
+    <ul id="findings"></ul>
+  </section>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="row main">
+    <section class="panel">
+      <div class="panel-head"><h2>Map</h2></div>
+      <div id="map"></div>
+      <p id="mapnote"></p>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><h2 id="caltitle">Burning activity calendar</h2></div>
+      <div id="cal"></div>
+      <div class="legend"><span>Weekly activity: low<span class="rampbar" id="rampbar"></span>high</span><span><i class="box" style="background:var(--cell-none)"></i>no data, or too few sensors to trust</span><span id="calunit"></span></div>
+    </section>
+  </div>
+
+  <div class="row">
+    <section class="panel">
+      <div class="panel-head"><h2>A typical year, and one year against it</h2></div>
+      <div id="typ"></div>
+      <div class="legend"><span><i style="background:var(--s-harm)"></i><span id="typyear"></span></span><span><i style="background:var(--ink-3)"></i>Median of all years</span><span><i class="box" style="background:var(--band)"></i>Usual range (10th to 90th percentile)</span><span><i class="box" style="background:var(--crit);width:8px;height:8px;border-radius:50%"></i>Unusually high week</span></div>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><h2>Yearly totals: raw sensors and the harmonized record</h2></div>
+      <div id="ann"></div>
+      <div class="legend"><span><i style="background:var(--s-harm)"></i>Harmonized</span><span><i style="background:var(--s-modis)"></i>MODIS raw count</span><span><i style="background:var(--s-viirs)"></i>VIIRS raw count</span></div>
+    </section>
+  </div>
+
+  <div class="row">
+    <section class="panel">
+      <div class="panel-head"><h2>Critical burning windows</h2></div>
+      <p>The busiest stretch of weeks that together hold about 80% of a typical year's burning.</p>
+      <div class="tablewrap" id="win"></div>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><h2>Unusually active weeks</h2></div>
+      <p>Weeks far above what is normal for that time of year in this area.</p>
+      <div class="tablewrap" id="anom"></div>
+    </section>
+  </div>
+
+  <section class="panel">
+    <div class="panel-head"><h2>How the two records are made comparable</h2><button id="copy" type="button">Copy weekly table as CSV</button></div>
+    <textarea id="copyout" readonly aria-label="Weekly harmonized table in CSV form"></textarea>
+    <div class="method">
+      <div>
+        <h3>The problem</h3>
+        <p>MODIS (1 km pixels, from late 2000) and VIIRS (375 m pixels, from 2012) do not see the same fires. VIIRS picks up many small and cool fires that MODIS misses, and more satellites fly now than before. If you simply add the counts together, burning seems to jump when a new sensor starts, even if nothing changed on the ground.</p>
+        <h3 style="margin-top:12px">The method</h3>
+        <ol>
+          <li>Keep presumed vegetation fires only. Drop MODIS detections with confidence below 30 and VIIRS detections marked low confidence.</li>
+          <li>Count detections per grid cell, per sensor, per week (52 bins a year).</li>
+          <li>For weeks when two sensors were both flying, measure how many detections each sensor makes for every one that VIIRS S-NPP makes. This is done per grid cell and per calendar month, because the mix of fire types changes with place and season. Cells with little data lean on the regional value.</li>
+          <li>Burning activity for a week is the total count from all sensors flying that week, divided by the sum of their detection rates. The unit is VIIRS S-NPP equivalent detections.</li>
+          <li id="weaknote">Weeks when the sensors in orbit had too little detection power are left out of the harmonized record.</li>
+        </ol>
+      </div>
+      <div>
+        <h3>Detection rate of each sensor</h3>
+        <div class="tablewrap" id="sens"></div>
+        <h3 style="margin-top:12px">Check: rebuild VIIRS from MODIS alone</h3>
+        <div id="valid"></div>
+      </div>
+      <div>
+        <h3>Limits to keep in mind</h3>
+        <ul>
+          <li>Activity means satellite detections, not area burned or number of fires. One large fire gives many detections.</li>
+          <li>Fires that MODIS cannot see at all cannot be recovered. The method assumes the share of such fires in a cell and month stayed the same over the years.</li>
+          <li>Years before VIIRS rest on fewer detections, so they are noisier.</li>
+          <li>Cloud and smoke hide fires from every sensor. Quiet weeks in a cloudy season may be undercounted.</li>
+          <li>Overpass times differ (Terra in the morning, Aqua and VIIRS in the early afternoon), which the monthly rates only partly absorb.</li>
+        </ul>
+        <h3 style="margin-top:12px">Data</h3>
+        <p>Active fire detections from NASA FIRMS: MODIS Collection 6.1 (MCD14ML) and VIIRS 375 m (VNP14IMG, VJ114IMG). Download archive CSVs from the FIRMS archive download page and load them with the button at the top.</p>
+      </div>
+    </div>
+  </section>
+  <footer>Built for the 2026 NASA Space Apps Challenge, Harmonization of MODIS and VIIRS Hot Spots. Country outlines from Natural Earth, Indian state boundaries from DataMeet (CC BY 4.0).</footer>
+</div>
+<div id="tip" role="status"></div>
+<script id="demo-data" type="application/json">/*DATA*/</script>
+<script id="world" type="application/json">/*WORLD*/</script>
+<script id="states" type="application/json">/*STATES*/</script>
+<script>/*CORE*/</script>
+<script>/*APP*/</script>
+</body>
+</html>
